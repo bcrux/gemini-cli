@@ -226,7 +226,7 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
 
       return {
         llmContent: llmContent.trim(),
-        returnDisplay: `Found ${matches.length} matche(s)`,
+        returnDisplay: `Found ${matches.length} match(es)`,
       };
     } catch (error) {
       console.error(`Error during GrepLogic execution: ${error}`);
