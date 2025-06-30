@@ -25,6 +25,7 @@ interface FooterProps {
   promptTokenCount: number;
   candidatesTokenCount: number;
   totalTokenCount: number;
+  cumulativeTotalTokenCount: number;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -38,9 +39,12 @@ export const Footer: React.FC<FooterProps> = ({
   showErrorDetails,
   showMemoryUsage,
   totalTokenCount,
+  cumulativeTotalTokenCount,
 }) => {
   const limit = tokenLimit(model);
-  const percentage = totalTokenCount / limit;
+  const effectiveTokenCount =
+    totalTokenCount > 0 ? totalTokenCount : cumulativeTotalTokenCount;
+  const percentage = effectiveTokenCount / limit;
 
   return (
     <Box marginTop={1} justifyContent="space-between" width="100%">
