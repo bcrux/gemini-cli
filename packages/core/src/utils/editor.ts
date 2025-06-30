@@ -12,10 +12,11 @@ export type EditorType =
   | 'windsurf'
   | 'cursor'
   | 'vim'
-  | 'zed';
+  | 'zed'
+  | 'env_var';
 
 function isValidEditorType(editor: string): editor is EditorType {
-  return ['vscode', 'vscodium', 'windsurf', 'cursor', 'vim', 'zed'].includes(
+  return ['vscode', 'vscodium', 'windsurf', 'cursor', 'vim', 'zed', 'env_var'].includes(
     editor,
   );
 }
@@ -37,7 +38,40 @@ function commandExists(cmd: string): boolean {
   }
 }
 
-const editorCommands: Record<EditorType, { win32: string; default: string }> = {
+function getEnvironmentEditor(): string | null {
+  return (
+    process.env['VISUAL'] ??
+    process.env['EDITOR'] ??
+    null
+  );
+}
+
+function isGuiEditor(editorCommand: string): boolean {
+  const guiEditorPatterns = [
+    'code', 'codium', 'windsurf', 'cursor', 'zed',
+    'subl', 'atom', 'gedit', 'kate', 'mousepad'
+  ];
+  const baseName = editorCommand.split(/[\\/]/).pop()?.split(/\s+/)[0] || '';
+  return guiEditorPatterns.some(pattern => baseName.includes(pattern));
+}
+
+function getExternalEditorDiffCommand(oldPath: string, newPath: string): DiffCommand | null {
+  const editor = getEnvironmentEditor();
+  if (!editor) return null;
+  
+  const isGui = isGuiEditor(editor);
+  
+  if (isGui) {
+    return { command: editor, args: ['--wait', '--diff', oldPath, newPath] };
+  } else {
+    return {
+      command: editor,
+      args: [oldPath, newPath]
+    };
+  }
+}
+
+const editorCommands: Record<Exclude<EditorType, 'env_var'>, { win32: string; default: string }> = {
   vscode: { win32: 'code.cmd', default: 'code' },
   vscodium: { win32: 'codium.cmd', default: 'codium' },
   windsurf: { win32: 'windsurf', default: 'windsurf' },
@@ -47,7 +81,14 @@ const editorCommands: Record<EditorType, { win32: string; default: string }> = {
 };
 
 export function checkHasEditorType(editor: EditorType): boolean {
-  const commandConfig = editorCommands[editor];
+  if (editor === 'env_var') {
+    const envEditor = getEnvironmentEditor();
+    if (!envEditor) return false;
+    const command = envEditor.split(/\s+/)[0];
+    return commandExists(command);
+  }
+  
+  const commandConfig = editorCommands[editor as Exclude<EditorType, 'env_var'>];
   const command =
     process.platform === 'win32' ? commandConfig.win32 : commandConfig.default;
   return commandExists(command);
@@ -86,16 +127,20 @@ export function getDiffCommand(
   if (!isValidEditorType(editor)) {
     return null;
   }
-  const commandConfig = editorCommands[editor];
-  const command =
-    process.platform === 'win32' ? commandConfig.win32 : commandConfig.default;
+  
   switch (editor) {
+    case 'env_var':
+      return getExternalEditorDiffCommand(oldPath, newPath);
     case 'vscode':
     case 'vscodium':
     case 'windsurf':
     case 'cursor':
-    case 'zed':
+    case 'zed': {
+      const commandConfig = editorCommands[editor as Exclude<EditorType, 'env_var'>];
+      const command =
+        process.platform === 'win32' ? commandConfig.win32 : commandConfig.default;
       return { command, args: ['--wait', '--diff', oldPath, newPath] };
+    }
     case 'vim':
       return {
         command: 'vim',
@@ -147,6 +192,46 @@ export async function openDiff(
 
   try {
     switch (editor) {
+      case 'env_var': {
+        const envEditor = getEnvironmentEditor();
+        if (!envEditor) {
+          throw new Error('No EDITOR or VISUAL environment variable set');
+        }
+        
+        const isGui = isGuiEditor(envEditor);
+        if (isGui) {
+          // Use spawn for GUI-based editors
+          return new Promise((resolve, reject) => {
+            const childProcess = spawn(diffCommand.command, diffCommand.args, {
+              stdio: 'inherit',
+              shell: true,
+            });
+
+            childProcess.on('close', (code) => {
+              if (code === 0) {
+                resolve();
+              } else {
+                reject(new Error(`${envEditor} exited with code ${code}`));
+              }
+            });
+
+            childProcess.on('error', (error) => {
+              reject(error);
+            });
+          });
+        } else {
+          // Use execSync for terminal-based editors
+          const command =
+            process.platform === 'win32'
+              ? `${diffCommand.command} ${diffCommand.args.join(' ')}`
+              : `${diffCommand.command} ${diffCommand.args.map((arg) => `"${arg}"`).join(' ')}`;
+          execSync(command, {
+            stdio: 'inherit',
+            encoding: 'utf8',
+          });
+          break;
+        }
+      }
       case 'vscode':
       case 'vscodium':
       case 'windsurf':
