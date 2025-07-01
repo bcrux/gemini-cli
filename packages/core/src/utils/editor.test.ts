@@ -29,11 +29,15 @@ vi.mock('child_process', () => ({
 }));
 
 const originalPlatform = process.platform;
+const originalVISUAL = process.env.VISUAL;
+const originalEDITOR = process.env.EDITOR;
 
 describe('editor utils', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.SANDBOX;
+    delete process.env.VISUAL;
+    delete process.env.EDITOR;
     Object.defineProperty(process, 'platform', {
       value: originalPlatform,
       writable: true,
@@ -43,6 +47,8 @@ describe('editor utils', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.SANDBOX;
+    process.env.VISUAL = originalVISUAL;
+    process.env.EDITOR = originalEDITOR;
     Object.defineProperty(process, 'platform', {
       value: originalPlatform,
       writable: true,
@@ -104,6 +110,75 @@ describe('editor utils', () => {
         });
       });
     }
+
+    describe('env_var', () => {
+      it('should return true if VISUAL environment variable is set and command exists', () => {
+        process.env.VISUAL = 'nano';
+        (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/nano'));
+        expect(checkHasEditorType('env_var')).toBe(true);
+        expect(execSync).toHaveBeenCalledWith('command -v nano', {
+          stdio: 'ignore',
+        });
+      });
+
+      it('should return true if EDITOR environment variable is set and command exists', () => {
+        process.env.EDITOR = 'vim';
+        (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/vim'));
+        expect(checkHasEditorType('env_var')).toBe(true);
+        expect(execSync).toHaveBeenCalledWith('command -v vim', {
+          stdio: 'ignore',
+        });
+      });
+
+      it('should prioritize VISUAL over EDITOR environment variable', () => {
+        process.env.VISUAL = 'nano';
+        process.env.EDITOR = 'vim';
+        (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/nano'));
+        expect(checkHasEditorType('env_var')).toBe(true);
+        expect(execSync).toHaveBeenCalledWith('command -v nano', {
+          stdio: 'ignore',
+        });
+      });
+
+      it('should return false if no environment variables are set', () => {
+        expect(checkHasEditorType('env_var')).toBe(false);
+        expect(execSync).not.toHaveBeenCalled();
+      });
+
+      it('should return false if environment variable is set but command does not exist', () => {
+        process.env.EDITOR = 'nonexistent-editor';
+        (execSync as Mock).mockImplementation(() => {
+          throw new Error('Command not found');
+        });
+        expect(checkHasEditorType('env_var')).toBe(false);
+      });
+
+      it('should handle editor commands with arguments', () => {
+        process.env.EDITOR = 'code --wait';
+        (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/code'));
+        expect(checkHasEditorType('env_var')).toBe(true);
+        expect(execSync).toHaveBeenCalledWith('command -v code', {
+          stdio: 'ignore',
+        });
+      });
+
+      it('should work on Windows with where.exe', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        process.env.EDITOR = 'notepad';
+        (execSync as Mock).mockReturnValue(Buffer.from('C:\\Windows\\System32\\notepad.exe'));
+        expect(checkHasEditorType('env_var')).toBe(true);
+        expect(execSync).toHaveBeenCalledWith('where.exe notepad', {
+          stdio: 'ignore',
+        });
+      });
+
+      it('should handle empty environment variables', () => {
+        process.env.VISUAL = '';
+        process.env.EDITOR = '';
+        expect(checkHasEditorType('env_var')).toBe(false);
+        expect(execSync).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('getDiffCommand', () => {
@@ -169,6 +244,92 @@ describe('editor utils', () => {
       // @ts-expect-error Testing unsupported editor
       const command = getDiffCommand('old.txt', 'new.txt', 'foobar');
       expect(command).toBeNull();
+    });
+
+    describe('env_var', () => {
+      it('should return GUI diff command when EDITOR is a GUI editor', () => {
+        process.env.EDITOR = 'code';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: 'code',
+          args: ['--wait', '--diff', 'old.txt', 'new.txt'],
+        });
+      });
+
+      it('should return terminal diff command when EDITOR is a terminal editor', () => {
+        process.env.EDITOR = 'nano';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: 'nano',
+          args: ['old.txt', 'new.txt'],
+        });
+      });
+
+      it('should prioritize VISUAL over EDITOR for diff command', () => {
+        process.env.VISUAL = 'vim';
+        process.env.EDITOR = 'nano';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: 'vim',
+          args: ['old.txt', 'new.txt'],
+        });
+      });
+
+      it('should return null when no environment variables are set', () => {
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toBeNull();
+      });
+
+      it('should detect GUI editors correctly', () => {
+        const guiEditors = ['code', 'codium', 'windsurf', 'cursor', 'zed', 'subl', 'atom'];
+        for (const editor of guiEditors) {
+          process.env.EDITOR = editor;
+          const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+          expect(command).toEqual({
+            command: editor,
+            args: ['--wait', '--diff', 'old.txt', 'new.txt'],
+          });
+        }
+      });
+
+      it('should detect terminal editors correctly', () => {
+        const terminalEditors = ['vim', 'nano', 'emacs', 'helix', 'micro'];
+        for (const editor of terminalEditors) {
+          process.env.EDITOR = editor;
+          const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+          expect(command).toEqual({
+            command: editor,
+            args: ['old.txt', 'new.txt'],
+          });
+        }
+      });
+
+      it('should handle editor commands with full paths', () => {
+        process.env.EDITOR = '/usr/local/bin/code';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: '/usr/local/bin/code',
+          args: ['--wait', '--diff', 'old.txt', 'new.txt'],
+        });
+      });
+
+      it('should handle editor commands with arguments', () => {
+        process.env.EDITOR = 'code --wait';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: 'code --wait',
+          args: ['--wait', '--diff', 'old.txt', 'new.txt'],
+        });
+      });
+
+      it('should handle Windows paths correctly', () => {
+        process.env.EDITOR = 'C:\\Program Files\\Microsoft VS Code\\code.exe';
+        const command = getDiffCommand('old.txt', 'new.txt', 'env_var');
+        expect(command).toEqual({
+          command: 'C:\\Program Files\\Microsoft VS Code\\code.exe',
+          args: ['--wait', '--diff', 'old.txt', 'new.txt'],
+        });
+      });
     });
   });
 
@@ -281,6 +442,98 @@ describe('editor utils', () => {
         'No diff tool available. Install a supported editor.',
       );
     });
+
+    describe('env_var GUI editor', () => {
+      it('should call spawn for GUI editor from environment variable', async () => {
+        process.env.EDITOR = 'code';
+        const mockSpawn = {
+          on: vi.fn((event, cb) => {
+            if (event === 'close') {
+              cb(0);
+            }
+          }),
+        };
+        (spawn as Mock).mockReturnValue(mockSpawn);
+        await openDiff('old.txt', 'new.txt', 'env_var');
+        expect(spawn).toHaveBeenCalledWith(
+          'code',
+          ['--wait', '--diff', 'old.txt', 'new.txt'],
+          {
+            stdio: 'inherit',
+            shell: true,
+          },
+        );
+      });
+
+      it('should reject if GUI editor from environment variable fails', async () => {
+        process.env.EDITOR = 'code';
+        const mockError = new Error('spawn error');
+        const mockSpawn = {
+          on: vi.fn((event, cb) => {
+            if (event === 'error') {
+              cb(mockError);
+            }
+          }),
+        };
+        (spawn as Mock).mockReturnValue(mockSpawn);
+        await expect(openDiff('old.txt', 'new.txt', 'env_var')).rejects.toThrow(
+          'spawn error',
+        );
+      });
+
+      it('should reject if GUI editor from environment variable exits with non-zero code', async () => {
+        process.env.EDITOR = 'code';
+        const mockSpawn = {
+          on: vi.fn((event, cb) => {
+            if (event === 'close') {
+              cb(1);
+            }
+          }),
+        };
+        (spawn as Mock).mockReturnValue(mockSpawn);
+        await expect(openDiff('old.txt', 'new.txt', 'env_var')).rejects.toThrow(
+          'code exited with code 1',
+        );
+      });
+    });
+
+    describe('env_var terminal editor', () => {
+      it('should call execSync for terminal editor from environment variable on non-windows', async () => {
+        Object.defineProperty(process, 'platform', { value: 'linux' });
+        process.env.EDITOR = 'nano';
+        await openDiff('old.txt', 'new.txt', 'env_var');
+        expect(execSync).toHaveBeenCalledWith(
+          'nano "old.txt" "new.txt"',
+          {
+            stdio: 'inherit',
+            encoding: 'utf8',
+          },
+        );
+      });
+
+      it('should call execSync for terminal editor from environment variable on windows', async () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        process.env.EDITOR = 'notepad';
+        await openDiff('old.txt', 'new.txt', 'env_var');
+        expect(execSync).toHaveBeenCalledWith(
+          'notepad old.txt new.txt',
+          {
+            stdio: 'inherit',
+            encoding: 'utf8',
+          },
+        );
+      });
+    });
+
+    it('should throw error when no environment variable is set for env_var', async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+      await openDiff('old.txt', 'new.txt', 'env_var');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'No diff tool available. Install a supported editor.',
+      );
+    });
   });
 
   describe('allowEditorTypeInSandbox', () => {
@@ -310,6 +563,15 @@ describe('editor utils', () => {
         expect(allowEditorTypeInSandbox(editor)).toBe(true);
       });
     }
+
+    it('should allow env_var in sandbox mode', () => {
+      process.env.SANDBOX = 'sandbox';
+      expect(allowEditorTypeInSandbox('env_var')).toBe(true);
+    });
+
+    it('should allow env_var when not in sandbox mode', () => {
+      expect(allowEditorTypeInSandbox('env_var')).toBe(true);
+    });
   });
 
   describe('isEditorAvailable', () => {
@@ -347,6 +609,31 @@ describe('editor utils', () => {
       (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/vim'));
       process.env.SANDBOX = 'sandbox';
       expect(isEditorAvailable('vim')).toBe(true);
+    });
+
+    it('should return true for env_var when EDITOR is set and command exists', () => {
+      process.env.EDITOR = 'nano';
+      (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/nano'));
+      expect(isEditorAvailable('env_var')).toBe(true);
+    });
+
+    it('should return false for env_var when no environment variables are set', () => {
+      expect(isEditorAvailable('env_var')).toBe(false);
+    });
+
+    it('should return false for env_var when EDITOR is set but command does not exist', () => {
+      process.env.EDITOR = 'nonexistent-editor';
+      (execSync as Mock).mockImplementation(() => {
+        throw new Error('Command not found');
+      });
+      expect(isEditorAvailable('env_var')).toBe(false);
+    });
+
+    it('should return true for env_var in sandbox mode when EDITOR is set and command exists', () => {
+      process.env.SANDBOX = 'sandbox';
+      process.env.EDITOR = 'vim';
+      (execSync as Mock).mockReturnValue(Buffer.from('/usr/bin/vim'));
+      expect(isEditorAvailable('env_var')).toBe(true);
     });
   });
 });
