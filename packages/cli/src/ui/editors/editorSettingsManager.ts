@@ -23,6 +23,7 @@ export const EDITOR_DISPLAY_NAMES: Record<EditorType, string> = {
   windsurf: 'Windsurf',
   cursor: 'Cursor',
   vim: 'Vim',
+  env_var: 'EDITOR Environment Variable',
 };
 
 class EditorSettingsManager {
@@ -30,6 +31,7 @@ class EditorSettingsManager {
 
   constructor() {
     const editorTypes: EditorType[] = [
+      'env_var',
       'zed',
       'vscode',
       'vscodium',
