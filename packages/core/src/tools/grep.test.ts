@@ -122,7 +122,7 @@ describe('GrepTool', () => {
       expect(result.llmContent).toContain('L2: second line with world');
       expect(result.llmContent).toContain('File: sub/fileC.txt');
       expect(result.llmContent).toContain('L1: another world in sub dir');
-      expect(result.returnDisplay).toBe('Found 3 matche(s)');
+      expect(result.returnDisplay).toBe('Found 3 match(es)');
     });
 
     it('should find matches in a specific path', async () => {
@@ -133,7 +133,7 @@ describe('GrepTool', () => {
       );
       expect(result.llmContent).toContain('File: fileC.txt'); // Path relative to 'sub'
       expect(result.llmContent).toContain('L1: another world in sub dir');
-      expect(result.returnDisplay).toBe('Found 1 matche(s)');
+      expect(result.returnDisplay).toBe('Found 1 match(es)');
     });
 
     it('should find matches with an include glob', async () => {
@@ -146,7 +146,7 @@ describe('GrepTool', () => {
       expect(result.llmContent).toContain(
         'L2: function baz() { return "hello"; }',
       );
-      expect(result.returnDisplay).toBe('Found 1 matche(s)');
+      expect(result.returnDisplay).toBe('Found 1 match(es)');
     });
 
     it('should find matches with an include glob and path', async () => {
@@ -165,7 +165,7 @@ describe('GrepTool', () => {
       );
       expect(result.llmContent).toContain('File: another.js');
       expect(result.llmContent).toContain('L1: const greeting = "hello";');
-      expect(result.returnDisplay).toBe('Found 1 matche(s)');
+      expect(result.returnDisplay).toBe('Found 1 match(es)');
     });
 
     it('should return "No matches found" when pattern does not exist', async () => {
